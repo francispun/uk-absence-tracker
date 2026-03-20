@@ -3,212 +3,242 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>BNO Absence Calculator (Rolling 180 Days)</title>
+  <title>BNO Absence Planner — Rolling 180 Days</title>
+  <!-- Flatpickr CDN -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+  
   <style>
-    body { font-family: Arial, sans-serif; max-width: 900px; margin: 20px auto; padding: 10px; }
-    h1 { text-align: center; }
-    #controls { margin: 20px 0; }
-    button { padding: 8px 16px; margin: 5px; }
+    body { font-family: Arial, sans-serif; max-width: 1000px; margin: 20px auto; padding: 10px; line-height: 1.5; }
+    h1, h2 { text-align: center; }
+    #controls, #add-trip { margin: 20px 0; padding: 15px; background: #f8f9fa; border: 1px solid #ddd; border-radius: 8px; }
+    button { padding: 8px 16px; margin: 5px; cursor: pointer; }
+    input, textarea { padding: 8px; width: calc(100% - 20px); margin: 5px 0; }
     table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
-    th { background: #f0f0f0; }
-    .danger { color: red; font-weight: bold; }
-    #result { font-size: 1.2em; margin: 20px 0; padding: 10px; border: 1px solid #aaa; }
-    textarea { width: 100%; height: 200px; font-family: monospace; }
+    th, td { border: 1px solid #ccc; padding: 10px; text-align: left; }
+    th { background: #e9ecef; }
+    .danger { color: red; font-weight: bold; background: #ffebee; padding: 10px; border-radius: 4px; }
+    .safe { color: green; font-weight: bold; background: #e8f5e9; padding: 10px; border-radius: 4px; }
+    #result { font-size: 1.3em; margin: 20px 0; text-align: center; }
+    .flatpickr-input { width: 48%; display: inline-block; }
+    small { color: #666; }
   </style>
 </head>
 <body>
 
-<h1>BNO / ILR Absence Tracker<br>(Rolling 180 days in any 12-month period)</h1>
+<h1>BNO / ILR Absence Planner<br>(Rolling max 180 days absent in any 12 months)</h1>
 
 <div id="controls">
-  <p>1. Upload or edit your <code>trips.json</code> below → 2. Calculate → 3. Download updated JSON if you add trips</p>
+  <p><strong>1.</strong> Upload your existing <code>trips.json</code> (or start fresh)</p>
   <input type="file" id="fileInput" accept=".json" />
-  <button onclick="loadFromFile()">Load JSON from file</button>
-  <button onclick="calculate()">Calculate Absences</button>
-  <button onclick="downloadJson()">Download updated trips.json</button>
+  <button onclick="loadJson()">Load JSON</button>
+  <button onclick="downloadJson()">Download updated JSON</button>
+  <button onclick="resetData()">Reset / Start New</button>
 </div>
 
-<h3>Current Trips (edit here if you want, then click Calculate)</h3>
-<textarea id="jsonEditor" placeholder="JSON will appear here after loading..."></textarea>
+<div id="add-trip">
+  <h2>Add / Plan a New Trip</h2>
+  <label>Departure: <input type="text" id="depart" class="flatpickr-input" placeholder="Select departure date" /></label>
+  <label>Return: <input type="text" id="return" class="flatpickr-input" placeholder="Select return date" /></label><br>
+  <label>Notes (optional): <input type="text" id="notes" placeholder="e.g. HK family visit" style="width: 60%;" /></label><br>
+  <button onclick="addTrip()">Add Trip</button>
+</div>
 
-<h3>Results</h3>
-<div id="result">Click "Calculate" after loading your JSON.</div>
-
-<h3>Trip List (for reference)</h3>
+<h2>Current Absences (including pre-entry)</h2>
 <table id="tripTable">
   <thead>
-    <tr><th>Depart</th><th>Return</th><th>Days Absent</th><th>Notes</th></tr>
+    <tr><th>Depart</th><th>Return</th><th>Days</th><th>Notes</th><th>Action</th></tr>
   </thead>
   <tbody></tbody>
 </table>
 
-<p><strong>How counting works:</strong> Full days absent (depart to return inclusive). Pre-entry absence auto-added from grant date to day before UK entry. Checks every possible 365-day sliding window.</p>
+<div id="result">Load or add trips, then click "Calculate" below ↓</div>
+<button onclick="calculate()" style="display:block; margin:20px auto; font-size:1.1em; padding:12px 30px;">Calculate Rolling Absences</button>
+
+<textarea id="jsonView" rows="8" style="width:100%; font-family:monospace; display:none;"></textarea>
 
 <script>
-// Global data
+// Global state
 let data = {
   grantDate: "2026-02-16",
   ukEntryDate: "2026-06-10",
-  trips: []
+  trips: []  // user-added only; pre-entry computed separately
 };
 
-const fileInput = document.getElementById('fileInput');
-const jsonEditor = document.getElementById('jsonEditor');
-const resultDiv = document.getElementById('result');
-const tableBody = document.querySelector('#tripTable tbody');
+const departPicker = flatpickr("#depart", {
+  dateFormat: "Y-m-d",
+  minDate: data.grantDate,
+  onChange: function(selectedDates, dateStr) {
+    returnPicker.set("minDate", dateStr);
+  }
+});
 
-// Load from uploaded file
-function loadFromFile() {
-  const file = fileInput.files[0];
-  if (!file) return alert("Select your trips.json file first.");
-  
+const returnPicker = flatpickr("#return", {
+  dateFormat: "Y-m-d",
+  minDate: data.grantDate
+});
+
+// Load JSON from file
+function loadJson() {
+  const file = document.getElementById("fileInput").files[0];
+  if (!file) return alert("Select trips.json first");
   const reader = new FileReader();
   reader.onload = e => {
     try {
       data = JSON.parse(e.target.result);
-      jsonEditor.value = JSON.stringify(data, null, 2);
-      alert("Loaded! Now click Calculate.");
+      if (!data.grantDate || !data.ukEntryDate) throw new Error("Missing grantDate or ukEntryDate");
+      updateView();
+      alert("Loaded successfully!");
     } catch(err) {
-      alert("Invalid JSON: " + err.message);
+      alert("Invalid JSON:\n" + err.message);
     }
   };
   reader.readAsText(file);
 }
 
-// Calculate everything
-function calculate() {
-  try {
-    const parsed = JSON.parse(jsonEditor.value);
-    data = parsed;
-  } catch(err) {
-    return alert("Fix JSON syntax first:\n" + err.message);
-  }
-
-  const allAbsences = getAllAbsencePeriods();
-  const maxAbsence = findMaxRollingAbsence(allAbsences);
-
-  let html = `<strong>Max absence in any rolling 365-day window:</strong> ${maxAbsence} days<br>`;
-  html += maxAbsence <= 180 
-    ? `<span style="color:green">SAFE — under 180 days ✓</span>`
-    : `<span class="danger">OVER LIMIT (${maxAbsence - 180} days excess) — may break continuous residence!</span>`;
-
-  resultDiv.innerHTML = html;
-
-  // Show table
-  tableBody.innerHTML = '';
-  allAbsences.forEach(p => {
-    const row = document.createElement('tr');
-    row.innerHTML = `<td>${p.start}</td><td>${p.end}</td><td>${p.days}</td><td>${p.notes || ''}</td>`;
-    tableBody.appendChild(row);
-  });
+// Reset to defaults
+function resetData() {
+  if (!confirm("Clear everything and start fresh?")) return;
+  data = { grantDate: "2026-02-16", ukEntryDate: "2026-06-10", trips: [] };
+  updateView();
 }
 
-// Get all absence periods (pre-entry + user trips)
-function getAllAbsencePeriods() {
+// Add new trip
+function addTrip() {
+  const depart = document.getElementById("depart").value;
+  const ret = document.getElementById("return").value;
+  const notes = document.getElementById("notes").value.trim();
+
+  if (!depart || !ret) return alert("Select both departure and return dates");
+  if (new Date(depart) > new Date(ret)) return alert("Return must be after departure");
+
+  data.trips.push({ depart, return: ret, notes });
+  updateView();
+  // Clear form
+  document.getElementById("depart").value = "";
+  document.getElementById("return").value = "";
+  document.getElementById("notes").value = "";
+}
+
+// Update table + textarea view
+function updateView() {
+  const tbody = document.querySelector("#tripTable tbody");
+  tbody.innerHTML = "";
+
+  // Pre-entry row
+  const preStart = data.grantDate;
+  const preEndObj = new Date(data.ukEntryDate);
+  preEndObj.setDate(preEndObj.getDate() - 1);
+  const preEnd = preEndObj.toISOString().split("T")[0];
+  const preDays = daysBetween(new Date(preStart), new Date(preEnd));
+  let row = document.createElement("tr");
+  row.innerHTML = `<td>${preStart}</td><td>${preEnd}</td><td>${preDays}</td><td>Pre-entry (auto)</td><td>—</td>`;
+  tbody.appendChild(row);
+
+  // User trips
+  data.trips.forEach((t, i) => {
+    const days = daysBetween(new Date(t.depart), new Date(t.return));
+    row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${t.depart}</td>
+      <td>${t.return}</td>
+      <td>${days}</td>
+      <td>${t.notes || ""}</td>
+      <td><button onclick="deleteTrip(${i})">Delete</button></td>`;
+    tbody.appendChild(row);
+  });
+
+  document.getElementById("jsonView").value = JSON.stringify(data, null, 2);
+}
+
+// Delete trip
+function deleteTrip(index) {
+  if (confirm("Delete this trip?")) {
+    data.trips.splice(index, 1);
+    updateView();
+  }
+}
+
+// Days between inclusive
+function daysBetween(d1, d2) {
+  const diff = Math.abs(d2 - d1);
+  return Math.floor(diff / (1000*60*60*24)) + 1;
+}
+
+// Core rolling calculation
+function calculate() {
   const periods = [];
 
-  // Pre-entry absence
-  const grant = new Date(data.grantDate);
-  const entry = new Date(data.ukEntryDate);
-  if (grant < entry) {
-    const preEnd = new Date(entry);
-    preEnd.setDate(preEnd.getDate() - 1); // day before entry
-    periods.push({
-      start: data.grantDate,
-      end: preEnd.toISOString().split('T')[0],
-      days: daysBetween(grant, preEnd),
-      notes: "Pre-entry (grant to day before UK entry)"
-    });
-  }
+  // Pre-entry
+  const preEndObj = new Date(data.ukEntryDate);
+  preEndObj.setDate(preEndObj.getDate() - 1);
+  periods.push({
+    start: new Date(data.grantDate),
+    end: preEndObj,
+    days: daysBetween(new Date(data.grantDate), preEndObj),
+    notes: "Pre-entry"
+  });
 
   // User trips
   data.trips.forEach(t => {
-    const d1 = new Date(t.depart);
-    const d2 = new Date(t.return);
-    if (d1 <= d2) {
-      periods.push({
-        start: t.depart,
-        end: t.return,
-        days: daysBetween(d1, d2),
-        notes: t.notes || ''
-      });
-    }
+    periods.push({
+      start: new Date(t.depart),
+      end: new Date(t.return),
+      days: daysBetween(new Date(t.depart), new Date(t.return)),
+      notes: t.notes
+    });
   });
 
-  return periods.sort((a,b) => new Date(a.start) - new Date(b.start));
-}
-
-// Days between two dates (inclusive)
-function daysBetween(d1, d2) {
-  const ms = Math.abs(d2 - d1);
-  return Math.floor(ms / (1000 * 60 * 60 * 24)) + 1;
-}
-
-// Find max absences in any 365-day window (brute force over daily points)
-function findMaxRollingAbsence(periods) {
-  if (periods.length === 0) return 0;
-
-  // Find overall start/end
-  let minDate = new Date(periods[0].start);
-  let maxDate = new Date(periods[periods.length-1].end);
-  
-  // Extend a bit for rolling windows
-  minDate.setFullYear(minDate.getFullYear() - 1);
-  maxDate.setFullYear(maxDate.getFullYear() + 1);
+  if (periods.length === 0) {
+    document.getElementById("result").innerHTML = "No absences yet — all good!";
+    return;
+  }
 
   let maxAbs = 0;
-  let current = new Date(minDate);
+  let start = new Date(Math.min(...periods.map(p => p.start)));
+  start.setFullYear(start.getFullYear() - 1);
+  let end = new Date(Math.max(...periods.map(p => p.end)));
+  end.setFullYear(end.getFullYear() + 1);
 
-  while (current <= maxDate) {
-    const windowStart = new Date(current);
-    const windowEnd = new Date(current);
-    windowEnd.setDate(windowEnd.getDate() + 364); // 365 days inclusive → +364
+  let current = new Date(start);
+  while (current <= end) {
+    const wStart = new Date(current);
+    const wEnd = new Date(current);
+    wEnd.setDate(wEnd.getDate() + 364);
 
     let sum = 0;
     periods.forEach(p => {
-      const ps = new Date(p.start);
-      const pe = new Date(p.end);
-      if (pe < windowStart || ps > windowEnd) return;
-
-      const overlapStart = ps > windowStart ? ps : windowStart;
-      const overlapEnd = pe < windowEnd ? pe : windowEnd;
-      if (overlapStart <= overlapEnd) {
-        sum += daysBetween(overlapStart, overlapEnd);
+      const oStart = p.start > wStart ? p.start : wStart;
+      const oEnd = p.end < wEnd ? p.end : wEnd;
+      if (oStart <= oEnd) {
+        sum += daysBetween(oStart, oEnd);
       }
     });
 
     if (sum > maxAbs) maxAbs = sum;
-    current.setDate(current.getDate() + 1); // slide by 1 day
+    current.setDate(current.getDate() + 1);
   }
 
-  return maxAbs;
+  const status = maxAbs <= 180
+    ? `<div class="safe">SAFE — Max in any rolling 365-day window: ${maxAbs} days (≤180) ✓<br>Buffer: ${180 - maxAbs} days left</div>`
+    : `<div class="danger">OVER LIMIT — Max: ${maxAbs} days (${maxAbs - 180} over)!<br>Review trips — may affect ILR continuous residence.</div>`;
+
+  document.getElementById("result").innerHTML = status;
 }
 
 // Download current JSON
 function downloadJson() {
-  try {
-    const updated = JSON.parse(jsonEditor.value);
-    const blob = new Blob([JSON.stringify(updated, null, 2)], {type: "application/json"});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = "trips.json";
-    a.click();
-    URL.revokeObjectURL(url);
-  } catch(err) {
-    alert("Invalid JSON — fix before download");
-  }
+  const blob = new Blob([JSON.stringify(data, null, 2)], {type: "application/json"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "trips.json";
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
-// Optional: init with default if no file
-if (jsonEditor.value.trim() === "") {
-  jsonEditor.value = JSON.stringify({
-    grantDate: "2026-02-16",
-    ukEntryDate: "2026-06-10",
-    trips: []
-  }, null, 2);
-}
+// Init
+updateView();
 </script>
 
 </body>
