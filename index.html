@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>BNO Absence Calculator (Rolling 180 Days)</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 900px; margin: 20px auto; padding: 10px; }
+    h1 { text-align: center; }
+    #controls { margin: 20px 0; }
+    button { padding: 8px 16px; margin: 5px; }
+    table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+    th { background: #f0f0f0; }
+    .danger { color: red; font-weight: bold; }
+    #result { font-size: 1.2em; margin: 20px 0; padding: 10px; border: 1px solid #aaa; }
+    textarea { width: 100%; height: 200px; font-family: monospace; }
+  </style>
+</head>
+<body>
+
+<h1>BNO / ILR Absence Tracker<br>(Rolling 180 days in any 12-month period)</h1>
+
+<div id="controls">
+  <p>1. Upload or edit your <code>trips.json</code> below → 2. Calculate → 3. Download updated JSON if you add trips</p>
+  <input type="file" id="fileInput" accept=".json" />
+  <button onclick="loadFromFile()">Load JSON from file</button>
+  <button onclick="calculate()">Calculate Absences</button>
+  <button onclick="downloadJson()">Download updated trips.json</button>
+</div>
+
+<h3>Current Trips (edit here if you want, then click Calculate)</h3>
+<textarea id="jsonEditor" placeholder="JSON will appear here after loading..."></textarea>
+
+<h3>Results</h3>
+<div id="result">Click "Calculate" after loading your JSON.</div>
+
+<h3>Trip List (for reference)</h3>
+<table id="tripTable">
+  <thead>
+    <tr><th>Depart</th><th>Return</th><th>Days Absent</th><th>Notes</th></tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<p><strong>How counting works:</strong> Full days absent (depart to return inclusive). Pre-entry absence auto-added from grant date to day before UK entry. Checks every possible 365-day sliding window.</p>
+
+<script>
+// Global data
+let data = {
+  grantDate: "2026-02-16",
+  ukEntryDate: "2026-06-10",
+  trips: []
+};
+
+const fileInput = document.getElementById('fileInput');
+const jsonEditor = document.getElementById('jsonEditor');
+const resultDiv = document.getElementById('result');
+const tableBody = document.querySelector('#tripTable tbody');
+
+// Load from uploaded file
+function loadFromFile() {
+  const file = fileInput.files[0];
+  if (!file) return alert("Select your trips.json file first.");
+  
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      data = JSON.parse(e.target.result);
+      jsonEditor.value = JSON.stringify(data, null, 2);
+      alert("Loaded! Now click Calculate.");
+    } catch(err) {
+      alert("Invalid JSON: " + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
+// Calculate everything
+function calculate() {
+  try {
+    const parsed = JSON.parse(jsonEditor.value);
+    data = parsed;
+  } catch(err) {
+    return alert("Fix JSON syntax first:\n" + err.message);
+  }
+
+  const allAbsences = getAllAbsencePeriods();
+  const maxAbsence = findMaxRollingAbsence(allAbsences);
+
+  let html = `<strong>Max absence in any rolling 365-day window:</strong> ${maxAbsence} days<br>`;
+  html += maxAbsence <= 180 
+    ? `<span style="color:green">SAFE — under 180 days ✓</span>`
+    : `<span class="danger">OVER LIMIT (${maxAbsence - 180} days excess) — may break continuous residence!</span>`;
+
+  resultDiv.innerHTML = html;
+
+  // Show table
+  tableBody.innerHTML = '';
+  allAbsences.forEach(p => {
+    const row = document.createElement('tr');
+    row.innerHTML = `<td>${p.start}</td><td>${p.end}</td><td>${p.days}</td><td>${p.notes || ''}</td>`;
+    tableBody.appendChild(row);
+  });
+}
+
+// Get all absence periods (pre-entry + user trips)
+function getAllAbsencePeriods() {
+  const periods = [];
+
+  // Pre-entry absence
+  const grant = new Date(data.grantDate);
+  const entry = new Date(data.ukEntryDate);
+  if (grant < entry) {
+    const preEnd = new Date(entry);
+    preEnd.setDate(preEnd.getDate() - 1); // day before entry
+    periods.push({
+      start: data.grantDate,
+      end: preEnd.toISOString().split('T')[0],
+      days: daysBetween(grant, preEnd),
+      notes: "Pre-entry (grant to day before UK entry)"
+    });
+  }
+
+  // User trips
+  data.trips.forEach(t => {
+    const d1 = new Date(t.depart);
+    const d2 = new Date(t.return);
+    if (d1 <= d2) {
+      periods.push({
+        start: t.depart,
+        end: t.return,
+        days: daysBetween(d1, d2),
+        notes: t.notes || ''
+      });
+    }
+  });
+
+  return periods.sort((a,b) => new Date(a.start) - new Date(b.start));
+}
+
+// Days between two dates (inclusive)
+function daysBetween(d1, d2) {
+  const ms = Math.abs(d2 - d1);
+  return Math.floor(ms / (1000 * 60 * 60 * 24)) + 1;
+}
+
+// Find max absences in any 365-day window (brute force over daily points)
+function findMaxRollingAbsence(periods) {
+  if (periods.length === 0) return 0;
+
+  // Find overall start/end
+  let minDate = new Date(periods[0].start);
+  let maxDate = new Date(periods[periods.length-1].end);
+  
+  // Extend a bit for rolling windows
+  minDate.setFullYear(minDate.getFullYear() - 1);
+  maxDate.setFullYear(maxDate.getFullYear() + 1);
+
+  let maxAbs = 0;
+  let current = new Date(minDate);
+
+  while (current <= maxDate) {
+    const windowStart = new Date(current);
+    const windowEnd = new Date(current);
+    windowEnd.setDate(windowEnd.getDate() + 364); // 365 days inclusive → +364
+
+    let sum = 0;
+    periods.forEach(p => {
+      const ps = new Date(p.start);
+      const pe = new Date(p.end);
+      if (pe < windowStart || ps > windowEnd) return;
+
+      const overlapStart = ps > windowStart ? ps : windowStart;
+      const overlapEnd = pe < windowEnd ? pe : windowEnd;
+      if (overlapStart <= overlapEnd) {
+        sum += daysBetween(overlapStart, overlapEnd);
+      }
+    });
+
+    if (sum > maxAbs) maxAbs = sum;
+    current.setDate(current.getDate() + 1); // slide by 1 day
+  }
+
+  return maxAbs;
+}
+
+// Download current JSON
+function downloadJson() {
+  try {
+    const updated = JSON.parse(jsonEditor.value);
+    const blob = new Blob([JSON.stringify(updated, null, 2)], {type: "application/json"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = "trips.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch(err) {
+    alert("Invalid JSON — fix before download");
+  }
+}
+
+// Optional: init with default if no file
+if (jsonEditor.value.trim() === "") {
+  jsonEditor.value = JSON.stringify({
+    grantDate: "2026-02-16",
+    ukEntryDate: "2026-06-10",
+    trips: []
+  }, null, 2);
+}
+</script>
+
+</body>
+</html>
