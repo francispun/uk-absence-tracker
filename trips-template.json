@@ -1,0 +1,16 @@
+{
+  "grantDate": "2026-02-16",
+  "ukEntryDate": "2026-06-10", 
+  "trips": [
+    {
+      "depart": "2026-09-01",
+      "return": "2026-09-07",
+      "notes": "September HK trip (7 days)"
+    },
+    {
+      "depart": "2027-01-25",
+      "return": "2027-02-07",
+      "notes": "Chinese New Year HK (14 days)"
+    }
+  ]
+}
