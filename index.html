@@ -60,22 +60,9 @@
     button:hover { background: #001a5e; transform: translateY(-3px); }
     .add-btn { background: #28a745; }
     .add-btn:hover { background: #218838; }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 15px 0;
-      background: white;
-    }
-    th {
-      background: var(--uk-blue);
-      color: white;
-      padding: 16px;
-      text-align: left;
-    }
-    td {
-      padding: 14px;
-      border-bottom: 1px solid #eee;
-    }
+    table { width: 100%; border-collapse: collapse; margin: 15px 0; background: white; }
+    th { background: var(--uk-blue); color: white; padding: 16px; text-align: left; }
+    td { padding: 14px; border-bottom: 1px solid #eee; }
     tr:hover { background: #f8f9fa; }
     .safe { background: #d4edda; color: #155724; padding: 18px; border-radius: 10px; font-size: 1.1em; }
     .danger { background: #f8d7da; color: #721c24; padding: 18px; border-radius: 10px; font-size: 1.1em; }
@@ -139,14 +126,14 @@ let data = {
   trips: []
 };
 
-const citizenshipAppDate = new Date("2032-02-16"); // grant + 6 years
+const citizenshipAppDate = new Date("2032-02-16");
 
-// ====================== FLATPICKR (fixed order to avoid addListener error) ======================
+// ====================== FLATPICKR ======================
 const departPicker = flatpickr("#depart", {
   dateFormat: "Y-m-d",
   minDate: data.grantDate,
   onChange: function(selectedDates, dateStr) {
-    returnPicker.set("minDate", dateStr || data.grantDate);
+    if (dateStr) returnPicker.set("minDate", dateStr);
   }
 });
 
@@ -155,7 +142,7 @@ const returnPicker = flatpickr("#return", {
   minDate: data.grantDate
 });
 
-// ====================== AUTO LOAD trips.json ======================
+// ====================== AUTO LOAD ======================
 async function loadAuto() {
   try {
     const res = await fetch('trips.json');
@@ -163,17 +150,17 @@ async function loadAuto() {
     data = await res.json();
     document.getElementById('status').innerHTML = '✅ trips.json loaded automatically';
   } catch {
-    document.getElementById('status').innerHTML = '⚠️ trips.json not found yet — add trips and download to save permanently';
+    document.getElementById('status').innerHTML = '⚠️ trips.json not found yet — add trips and download to save';
   }
   updateView();
 }
 window.addEventListener('load', loadAuto);
 
 // ====================== HELPERS ======================
-function daysAbsent(departStr, returnStr) {
-  const d1 = new Date(departStr);
-  const d2 = new Date(returnStr);
-  return Math.floor((d2 - d1) / (1000 * 60 * 60 * 24)); // official: only full days outside
+function daysAbsent(d1, d2) {
+  const start = (d1 instanceof Date) ? d1 : new Date(d1);
+  const end = (d2 instanceof Date) ? d2 : new Date(d2);
+  return Math.max(0, Math.floor((end - start) / 86400000));
 }
 
 function updateView() {
@@ -227,70 +214,59 @@ function downloadJson() {
   a.click();
 }
 
-// ====================== FULL CALCULATION ======================
+// ====================== CALCULATION (FIXED) ======================
 function calculate() {
   const periods = [];
-  // Pre-entry
-  periods.push({
-    start: new Date(data.grantDate),
-    end: new Date(data.ukEntryDate)
-  });
-  // User trips
-  data.trips.forEach(t => {
-    periods.push({
-      start: new Date(t.depart),
-      end: new Date(t.return)
-    });
-  });
+  periods.push({ start: new Date(data.grantDate), end: new Date(data.ukEntryDate) });
+  data.trips.forEach(t => periods.push({ start: new Date(t.depart), end: new Date(t.return) }));
 
   // ILR rolling 180
   let maxRolling = 0;
-  let minD = new Date(Math.min(...periods.map(p => p.start)));
+  let minD = new Date(Math.min(...periods.map(p => p.start.getTime())));
   minD.setFullYear(minD.getFullYear() - 1);
-  let maxD = new Date(Math.max(...periods.map(p => p.end)));
+  let maxD = new Date(Math.max(...periods.map(p => p.end.getTime())));
   maxD.setFullYear(maxD.getFullYear() + 1);
 
   let current = new Date(minD);
   while (current <= maxD) {
     const wEnd = new Date(current);
     wEnd.setDate(wEnd.getDate() + 364);
+
     let sum = 0;
     periods.forEach(p => {
-      const oStart = Math.max(p.start, current);
-      const oEnd = Math.min(p.end, wEnd);
+      const oStart = new Date(Math.max(p.start.getTime(), current.getTime()));
+      const oEnd = new Date(Math.min(p.end.getTime(), wEnd.getTime()));
       if (oStart <= oEnd) {
-        sum += daysAbsent(oStart.toISOString().split('T')[0], oEnd.toISOString().split('T')[0]);
+        sum += daysAbsent(oStart, oEnd);
       }
     });
     if (sum > maxRolling) maxRolling = sum;
     current.setDate(current.getDate() + 1);
   }
 
-  // Citizenship (fixed 5 years before 16 Feb 2032)
-  const fiveYearsBefore = new Date(2032, 1, 16);
-  fiveYearsBefore.setFullYear(fiveYearsBefore.getFullYear() - 5);
-  const twelveMonthsBefore = new Date(2032, 1, 16);
-  twelveMonthsBefore.setFullYear(twelveMonthsBefore.getFullYear() - 1);
+  // Citizenship (2027-02-16 to 2032-02-16)
+  const fiveYearsBefore = new Date(2027, 1, 16);
+  const twelveMonthsBefore = new Date(2031, 1, 16);
 
   let total5yr = 0;
   let final12m = 0;
 
   periods.forEach(p => {
-    const o5s = Math.max(p.start, fiveYearsBefore);
-    const o5e = Math.min(p.end, new Date(2032, 1, 16));
-    if (o5s <= o5e) total5yr += daysAbsent(o5s.toISOString().split('T')[0], o5e.toISOString().split('T')[0]);
+    const o5s = new Date(Math.max(p.start.getTime(), fiveYearsBefore.getTime()));
+    const o5e = new Date(Math.min(p.end.getTime(), citizenshipAppDate.getTime()));
+    if (o5s <= o5e) total5yr += daysAbsent(o5s, o5e);
 
-    const o12s = Math.max(p.start, twelveMonthsBefore);
-    const o12e = Math.min(p.end, new Date(2032, 1, 16));
-    if (o12s <= o12e) final12m += daysAbsent(o12s.toISOString().split('T')[0], o12e.toISOString().split('T')[0]);
+    const o12s = new Date(Math.max(p.start.getTime(), twelveMonthsBefore.getTime()));
+    const o12e = new Date(Math.min(p.end.getTime(), citizenshipAppDate.getTime()));
+    if (o12s <= o12e) final12m += daysAbsent(o12s, o12e);
   });
 
   // Result
-  let html = `<div class="safe"><strong>ILR Rolling 180:</strong> Max in any 12-month window = ${maxRolling} days<br>`;
+  let html = `<div class="safe"><strong>ILR Rolling 180:</strong> Max = ${maxRolling} days<br>`;
   html += (maxRolling <= 180) ? "✅ SAFE for ILR" : "❌ OVER LIMIT";
   html += `</div><br><div class="${total5yr <= 450 && final12m <= 90 ? 'safe' : 'danger'}">`;
   html += `<strong>Citizenship (apply Feb 2032):</strong><br>`;
-  html += `Total absent in 5 years = ${total5yr} days (limit 450)<br>`;
+  html += `5-year total = ${total5yr} days (limit 450)<br>`;
   html += `Final 12 months = ${final12m} days (limit 90)<br>`;
   html += (total5yr <= 450 && final12m <= 90) ? "✅ SAFE for British citizenship" : "❌ RISK — may affect citizenship";
   html += `</div>`;
