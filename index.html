@@ -3,53 +3,34 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>BNO Absence Planner — ILR + Citizenship</title>
-  <!-- Flatpickr CDN -->
+  <title>BNO Planner — ILR + Citizenship (Shortest Route)</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
   <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
-  
   <style>
-    body { font-family: Arial, sans-serif; max-width: 1000px; margin: 20px auto; padding: 10px; line-height: 1.5; }
-    h1, h2 { text-align: center; }
-    #controls, #add-trip, #citizenship { margin: 20px 0; padding: 15px; background: #f8f9fa; border: 1px solid #ddd; border-radius: 8px; }
-    button { padding: 8px 16px; margin: 5px; cursor: pointer; }
-    input, textarea, select { padding: 8px; width: calc(100% - 20px); margin: 5px 0; }
-    table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+    body { font-family: Arial, sans-serif; max-width: 1000px; margin: 20px auto; padding: 20px; line-height: 1.6; }
+    h1 { text-align: center; color: #1a5276; }
+    .box { background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 20px 0; border: 1px solid #ddd; }
+    button { padding: 10px 20px; margin: 5px; cursor: pointer; font-size: 1em; }
+    table { width: 100%; border-collapse: collapse; margin: 15px 0; }
     th, td { border: 1px solid #ccc; padding: 10px; text-align: left; }
     th { background: #e9ecef; }
-    .danger { color: red; font-weight: bold; background: #ffebee; padding: 10px; border-radius: 4px; }
-    .safe { color: green; font-weight: bold; background: #e8f5e9; padding: 10px; border-radius: 4px; }
-    #result { font-size: 1.3em; margin: 20px 0; text-align: center; }
-    .flatpickr-input { width: 48%; display: inline-block; }
-    small { color: #666; }
-    #status { text-align: center; color: #555; font-style: italic; }
+    .safe { color: green; font-weight: bold; background: #e8f5e9; padding: 12px; border-radius: 6px; }
+    .danger { color: red; font-weight: bold; background: #ffebee; padding: 12px; border-radius: 6px; }
+    #status { text-align: center; font-style: italic; color: #555; }
+    .flatpickr-input { width: 48%; }
   </style>
 </head>
 <body>
 
-<h1>BNO Absence Planner<br>ILR (Rolling 180) + Citizenship (450 days in 5 yrs)</h1>
+<h1>BNO Absence Planner<br>ILR (Rolling 180) + Citizenship (450/90 days — shortest route)</h1>
 
-<div id="status">Loading your trips.json automatically... (if committed to repo)</div>
+<div id="status">Loading trips.json automatically...</div>
 
-<div id="controls">
-  <p><strong>Manual load fallback:</strong> Upload trips.json if auto-load fails</p>
-  <input type="file" id="fileInput" accept=".json" />
-  <button onclick="loadJsonManual()">Load from file</button>
-  <button onclick="downloadJson()">Download updated JSON</button>
-  <button onclick="resetData()">Reset</button>
-</div>
-
-<div id="citizenship">
-  <h2>Citizenship Planning (5-year route)</h2>
-  <label>Intended Application Date: <input type="text" id="appDate" class="flatpickr-input" placeholder="YYYY-MM-DD" /></label><br>
-  <small>(Absences calculated in the 5 years BEFORE this date + final 12 months check)</small>
-</div>
-
-<div id="add-trip">
-  <h2>Add / Plan a Trip</h2>
-  <label>Departure: <input type="text" id="depart" class="flatpickr-input" placeholder="Select departure" /></label>
-  <label>Return: <input type="text" id="return" class="flatpickr-input" placeholder="Select return" /></label><br>
-  <label>Notes: <input type="text" id="notes" placeholder="e.g. HK visit" style="width:60%;" /></label><br>
+<div class="box">
+  <h2>Add / Plan a Trip (calendar)</h2>
+  Departure: <input type="text" id="depart" class="flatpickr-input" placeholder="Pick date" />
+  Return:    <input type="text" id="return" class="flatpickr-input" placeholder="Pick date" /><br>
+  Notes:     <input type="text" id="notes" placeholder="e.g. Family visit HK" style="width:60%;" />
   <button onclick="addTrip()">Add Trip</button>
 </div>
 
@@ -59,59 +40,167 @@
   <tbody></tbody>
 </table>
 
-<div id="result">Add trips / set date, then click Calculate ↓</div>
-<button onclick="calculate()" style="display:block; margin:20px auto; font-size:1.1em; padding:12px 30px;">Calculate Absences</button>
+<div class="box">
+  <button onclick="calculate()" style="font-size:1.2em; padding:15px 30px;">Calculate — Check ILR & Citizenship Safety</button>
+</div>
 
-<textarea id="jsonView" rows="8" style="width:100%; font-family:monospace; display:none;"></textarea>
+<div id="result"></div>
+
+<button onclick="downloadJson()">Download updated trips.json (save to GitHub)</button>
+<button onclick="resetData()">Reset everything</button>
 
 <script>
-// Globals
+// ====================== CONFIG ======================
 let data = {
   grantDate: "2026-02-16",
   ukEntryDate: "2026-06-10",
   trips: []
 };
 
-const appDatePicker = flatpickr("#appDate", { dateFormat: "Y-m-d" });
-const departPicker = flatpickr("#depart", { dateFormat: "Y-m-d", minDate: data.grantDate, onChange: (sel, str) => returnPicker.set("minDate", str) });
+// Auto-set citizenship application date (shortest route: 5 years + 1 year ILR)
+const citizenshipAppDate = new Date(data.grantDate);
+citizenshipAppDate.setFullYear(citizenshipAppDate.getFullYear() + 6); // 16 Feb 2032
+
+// Flatpickr calendars
+flatpickr("#depart", { dateFormat: "Y-m-d", minDate: data.grantDate, onChange: (_, str) => returnPicker.set("minDate", str) });
 const returnPicker = flatpickr("#return", { dateFormat: "Y-m-d", minDate: data.grantDate });
 
-// Auto-load on page open
-async function loadJsonAuto() {
+// ====================== AUTO-LOAD trips.json ======================
+async function loadAuto() {
   try {
-    const response = await fetch('trips.json');
-    if (!response.ok) throw new Error('File not found or network issue');
-    data = await response.json();
-    if (!data.grantDate || !data.ukEntryDate) throw new Error('Missing required dates');
-    document.getElementById('status').innerHTML = 'trips.json loaded automatically ✓';
+    const res = await fetch('trips.json');
+    if (!res.ok) throw new Error();
+    data = await res.json();
+    document.getElementById('status').innerHTML = '✅ trips.json loaded automatically';
+  } catch {
+    document.getElementById('status').innerHTML = '⚠️ No trips.json found yet — using defaults. Add trips and download.';
+  }
+  updateView();
+}
+window.addEventListener('load', loadAuto);
+
+// ====================== CORE FUNCTIONS ======================
+function daysBetween(d1, d2) {
+  return Math.floor(Math.abs(d2 - d1) / (1000*60*60*24)) + 1;
+}
+
+function updateView() {
+  const tbody = document.querySelector("#tripTable tbody");
+  tbody.innerHTML = "";
+
+  // Pre-entry
+  const preEnd = new Date(data.ukEntryDate);
+  preEnd.setDate(preEnd.getDate() - 1);
+  const preDays = daysBetween(new Date(data.grantDate), preEnd);
+  let row = document.createElement("tr");
+  row.innerHTML = `<td>${data.grantDate}</td><td>${preEnd.toISOString().split('T')[0]}</td><td>${preDays}</td><td>Pre-entry (auto)</td><td>—</td>`;
+  tbody.appendChild(row);
+
+  // User trips
+  data.trips.forEach((t, i) => {
+    const days = daysBetween(new Date(t.depart), new Date(t.return));
+    row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${t.depart}</td><td>${t.return}</td><td>${days}</td><td>${t.notes||''}</td>
+      <td><button onclick="deleteTrip(${i})">Delete</button></td>`;
+    tbody.appendChild(row);
+  });
+}
+
+function addTrip() {
+  const depart = document.getElementById("depart").value;
+  const ret = document.getElementById("return").value;
+  const notes = document.getElementById("notes").value.trim();
+  if (!depart || !ret) return alert("Please pick both dates");
+  data.trips.push({depart, return: ret, notes});
+  updateView();
+  document.getElementById("depart").value = "";
+  document.getElementById("return").value = "";
+  document.getElementById("notes").value = "";
+}
+
+function deleteTrip(i) {
+  if (confirm("Delete this trip?")) {
+    data.trips.splice(i, 1);
     updateView();
-  } catch (err) {
-    document.getElementById('status').innerHTML = `Auto-load failed: ${err.message}. Using defaults. Commit trips.json to repo or load manually.`;
-    updateView(); // Show defaults
   }
 }
 
-// Manual load (fallback)
-function loadJsonManual() {
-  const file = document.getElementById("fileInput").files[0];
-  if (!file) return alert("Select trips.json first");
-  const reader = new FileReader();
-  reader.onload = e => {
-    try {
-      data = JSON.parse(e.target.result);
-      updateView();
-      document.getElementById('status').innerHTML = 'Loaded from uploaded file ✓';
-    } catch(err) {
-      alert("Invalid JSON: " + err.message);
-    }
-  };
-  reader.readAsText(file);
+function downloadJson() {
+  const blob = new Blob([JSON.stringify(data, null, 2)], {type: "application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "trips.json";
+  a.click();
 }
 
-// Other functions: resetData, addTrip, deleteTrip, updateView, daysBetween, calculate, overlapDays, getPeriods, findMaxRolling, downloadJson
-// (Copy them from the previous full code version you have — they remain unchanged)
+// ====================== CALCULATION ======================
+function calculate() {
+  const periods = [];
+  // Pre-entry
+  const preEnd = new Date(data.ukEntryDate); preEnd.setDate(preEnd.getDate()-1);
+  periods.push({start: new Date(data.grantDate), end: preEnd});
 
-window.addEventListener('load', loadJsonAuto);
+  data.trips.forEach(t => {
+    periods.push({start: new Date(t.depart), end: new Date(t.return)});
+  });
+
+  // ILR rolling 180
+  let maxRolling = 0;
+  let startDate = new Date(Math.min(...periods.map(p => p.start)));
+  startDate.setFullYear(startDate.getFullYear() - 1);
+  let endDate = new Date(Math.max(...periods.map(p => p.end)));
+  endDate.setFullYear(endDate.getFullYear() + 1);
+
+  let current = new Date(startDate);
+  while (current <= endDate) {
+    const wEnd = new Date(current); wEnd.setDate(wEnd.getDate() + 364);
+    let sum = 0;
+    periods.forEach(p => {
+      const oStart = Math.max(p.start, current);
+      const oEnd = Math.min(p.end, wEnd);
+      if (oStart <= oEnd) sum += daysBetween(oStart, oEnd);
+    });
+    if (sum > maxRolling) maxRolling = sum;
+    current.setDate(current.getDate() + 1);
+  }
+
+  // Citizenship (fixed 5 years before 2032-02-16)
+  const citApp = citizenshipAppDate;
+  const fiveYearsBefore = new Date(citApp); fiveYearsBefore.setFullYear(fiveYearsBefore.getFullYear() - 5);
+  const twelveMonthsBefore = new Date(citApp); twelveMonthsBefore.setFullYear(twelveMonthsBefore.getFullYear() - 1);
+
+  let total5yr = 0, final12m = 0;
+  periods.forEach(p => {
+    const o5 = Math.max(p.start, fiveYearsBefore);
+    const o5e = Math.min(p.end, citApp);
+    if (o5 <= o5e) total5yr += daysBetween(o5, o5e);
+
+    const o12 = Math.max(p.start, twelveMonthsBefore);
+    const o12e = Math.min(p.end, citApp);
+    if (o12 <= o12e) final12m += daysBetween(o12, o12e);
+  });
+
+  // Result
+  let html = `<div class="safe"><strong>ILR (Rolling 180):</strong> Max in any 12-month window = ${maxRolling} days<br>`;
+  html += maxRolling <= 180 ? "✅ SAFE for ILR" : "❌ OVER LIMIT — fix trips";
+  html += `</div><br><div class="${total5yr <= 450 && final12m <= 90 ? 'safe' : 'danger'}">`;
+  html += `<strong>Citizenship (apply Feb 2032):</strong><br>`;
+  html += `Total in 5 years before application: ${total5yr} days (limit 450)<br>`;
+  html += `Final 12 months: ${final12m} days (limit 90)<br>`;
+  html += (total5yr <= 450 && final12m <= 90) ? "✅ SAFE for British citizenship" : "❌ RISK — may lose citizenship eligibility (discretion possible but not guaranteed)";
+  html += `</div>`;
+
+  document.getElementById("result").innerHTML = html;
+}
+
+function resetData() {
+  if (confirm("Reset everything?")) {
+    data.trips = [];
+    updateView();
+    calculate();
+  }
+}
 </script>
 
 </body>
