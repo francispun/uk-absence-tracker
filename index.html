@@ -4,13 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>BNO Planner — ILR + Citizenship</title>
-  
+ 
   <!-- UK Flag Emoji Favicon -->
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22 text-anchor=%22middle%22 x=%2250%25%22>🇬🇧</text></svg>">
-  
+ 
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
   <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
-  
+ 
   <style>
     :root { --uk-blue: #00247d; --uk-red: #cf142b; }
     body {
@@ -70,12 +70,11 @@
     .flatpickr-input { width: 100%; box-sizing: border-box; padding: 12px; border: 2px solid #ddd; border-radius: 6px; font-size: 1em; }
     #status { text-align: center; font-style: italic; color: #555; margin-bottom: 10px; }
     label { font-weight: bold; display: block; margin-bottom: 5px; }
+    textarea { font-family: monospace; resize: vertical; }
   </style>
 </head>
 <body>
-
 <div class="container">
-
 <header>
   <h1>🇬🇧 BNO Absence Planner</h1>
   <p>ILR Rolling 180 days + Citizenship 450/90 days (shortest 5+1 route)</p>
@@ -89,7 +88,36 @@
   • Pre-entry absence is calculated from Visa Grant Date to the day before UK Entry Date.
 </div>
 
-<div id="status">Loading your trips.json automatically...</div>
+<div id="status">Ready — Import CSV or add trips manually</div>
+
+<!-- NEW CSV IMPORT SECTION (replaces old JSON auto-load) -->
+<div class="card">
+  <h2>📥 CSV Import / Export (for easy public sharing)</h2>
+  <p><strong>Format:</strong> First line = Grant Date, UK Entry Date, Notes<br>
+  Then one line per trip: Departure, Return, Notes<br>
+  Dates can be <strong>MM/DD/YYYY</strong> or <strong>YYYY-MM-DD</strong>. Commas in notes are handled automatically.</p>
+  
+  <div class="grid-2" style="margin-bottom: 20px;">
+    <div>
+      <label>Paste CSV here:</label>
+      <textarea id="csvPaste" rows="7" placeholder="02/16/2026,06/10/2026,Grant Date - UK Entry Date
+09/10/2026,09/16/2026,Friend Wedding
+11/04/2026,11/13/2026,Europe Trip
+02/04/2027,02/18/2027,CNY" style="width:100%; padding:12px; border:2px solid #ddd; border-radius:6px;"></textarea>
+      <button onclick="loadFromPaste()" style="width:100%; margin-top:8px;">Load Pasted CSV</button>
+    </div>
+    
+    <div>
+      <label>Upload CSV file:</label>
+      <input type="file" id="csvFileInput" accept=".csv" style="width:100%; padding:12px; border:2px solid #ddd; border-radius:6px; margin-bottom:8px;">
+      <button onclick="loadFromFile()" style="width:100%;">Upload &amp; Load CSV</button>
+    </div>
+  </div>
+  
+  <p style="font-size:0.95em; color:#555; margin-top:15px;">
+    Share your absences with friends — just send them the downloaded CSV and they can upload it here!
+  </p>
+</div>
 
 <div class="card grid-2">
   <div>
@@ -128,16 +156,15 @@
 </div>
 
 <div class="card">
-  <button onclick="calculate()" style="width:100%; padding:20px; font-size:1.3em;">Calculate Safety for ILR & Citizenship</button>
+  <button onclick="calculate()" style="width:100%; padding:20px; font-size:1.3em;">Calculate Safety for ILR &amp; Citizenship</button>
 </div>
 
 <div id="result"></div>
 
 <div style="text-align:center; margin-top:40px;">
-  <button onclick="downloadJson()">Download updated trips.json</button>
+  <button onclick="downloadCsv()" style="background:#28a745;">Download CSV (for sharing)</button>
   <button onclick="resetData()" style="background:#dc3545; margin-left:15px;">Reset Everything</button>
 </div>
-
 </div>
 
 <script>
@@ -151,40 +178,117 @@ let data = {
 // ====================== FLATPICKR ======================
 const grantPicker = flatpickr("#grantDate", { dateFormat: "Y-m-d", defaultDate: data.grantDate });
 const entryPicker = flatpickr("#entryDate", { dateFormat: "Y-m-d", defaultDate: data.ukEntryDate });
-
 const departPicker = flatpickr("#depart", {
   dateFormat: "Y-m-d",
   onChange: function(selectedDates, dateStr) {
     if (dateStr) returnPicker.set("minDate", dateStr);
   }
 });
+const returnPicker = flatpickr("#return", { dateFormat: "Y-m-d" });
 
-const returnPicker = flatpickr("#return", {
-  dateFormat: "Y-m-d"
+// ====================== CSV DATE PARSER ======================
+// Handles both MM/DD/YYYY and YYYY-MM-DD
+function parseCsvDate(str) {
+  if (!str || typeof str !== "string") return null;
+  str = str.trim();
+  // Already YYYY-MM-DD?
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+  // Try parsing (works for MM/DD/YYYY, M/D/YYYY, etc.)
+  const date = new Date(str);
+  if (isNaN(date.getTime())) return null;
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+// ====================== CSV ESCAPE ======================
+function csvEscape(field) {
+  if (!field) return "";
+  field = String(field);
+  if (field.includes(",") || field.includes('"') || field.includes("\n")) {
+    return '"' + field.replace(/"/g, '""') + '"';
+  }
+  return field;
+}
+
+// ====================== CSV PARSER ======================
+function parseCsv(csvText) {
+  const lines = csvText.trim().split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+  if (lines.length === 0) {
+    alert("CSV is empty");
+    return;
+  }
+
+  // Detect if first line is header (non-date) or actual data
+  const firstLineParts = lines[0].split(",").map(s => s.trim().replace(/^"|"$/g, ""));
+  const firstDate = parseCsvDate(firstLineParts[0]);
+  const secondDate = parseCsvDate(firstLineParts[1]);
+  let startIdx = (firstDate && secondDate) ? 0 : 1;
+
+  if (startIdx >= lines.length) {
+    alert("No valid date line found in CSV");
+    return;
+  }
+
+  // Parse Grant + Entry
+  const grantLineParts = lines[startIdx].split(",").map(s => s.trim().replace(/^"|"$/g, ""));
+  const newGrant = parseCsvDate(grantLineParts[0]);
+  const newEntry = parseCsvDate(grantLineParts[1]);
+  if (newGrant) data.grantDate = newGrant;
+  if (newEntry) data.ukEntryDate = newEntry;
+
+  // Parse trips
+  data.trips = [];
+  for (let i = startIdx + 1; i < lines.length; i++) {
+    const lineParts = lines[i].split(",").map(s => s.trim().replace(/^"|"$/g, ""));
+    if (lineParts.length < 2) continue;
+    const dep = parseCsvDate(lineParts[0]);
+    const ret = parseCsvDate(lineParts[1]);
+    if (dep && ret) {
+      const notes = lineParts.slice(2).join(", ");
+      data.trips.push({ depart: dep, return: ret, notes: notes || "" });
+    }
+  }
+
+  // Update UI
+  grantPicker.setDate(data.grantDate);
+  entryPicker.setDate(data.ukEntryDate);
+  updateView();
+  document.getElementById("status").innerHTML = "✅ CSV loaded successfully!";
+}
+
+// ====================== CSV LOAD FUNCTIONS ======================
+function loadFromPaste() {
+  const text = document.getElementById("csvPaste").value.trim();
+  if (!text) return alert("Paste some CSV first");
+  parseCsv(text);
+}
+
+function loadFromFile() {
+  const fileInput = document.getElementById("csvFileInput");
+  if (!fileInput.files || !fileInput.files[0]) {
+    alert("Please select a CSV file first");
+    return;
+  }
+  const file = fileInput.files[0];
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    parseCsv(e.target.result);
+    fileInput.value = ""; // clear for next upload
+  };
+  reader.readAsText(file);
+}
+
+// ====================== AUTO INIT ======================
+window.addEventListener("load", () => {
+  updateView();
+  document.getElementById("status").innerHTML = "Ready — Import CSV or add trips manually";
 });
 
-// ====================== AUTO LOAD ======================
-async function loadAuto() {
-  try {
-    const res = await fetch('trips.json');
-    if (!res.ok) throw new Error();
-    const loadedData = await res.json();
-    if(loadedData.grantDate) data = loadedData;
-    
-    grantPicker.setDate(data.grantDate);
-    entryPicker.setDate(data.ukEntryDate);
-    document.getElementById('status').innerHTML = '✅ trips.json loaded automatically';
-  } catch {
-    document.getElementById('status').innerHTML = '⚠️ trips.json not found yet — add trips and download to save';
-  }
-  updateView();
-}
-window.addEventListener('load', loadAuto);
-
 // ====================== HELPERS ======================
-// Parse YYYY-MM-DD reliably to local date to avoid timezone shifting
 function parseDate(str) {
-  const [y, m, d] = str.split('-');
+  const [y, m, d] = str.split("-");
   return new Date(y, m - 1, d);
 }
 
@@ -194,18 +298,15 @@ function updateBaseDates() {
   updateView();
 }
 
-// Get exact absent days based on Home Office Rules
 function getPreEntryAbsentDays() {
   const grant = parseDate(data.grantDate);
   const entry = parseDate(data.ukEntryDate);
-  // Grant day is absent. Entry day is present.
   return Math.max(0, Math.floor((entry - grant) / 86400000));
 }
 
 function getTripAbsentDays(departStr, returnStr) {
   const d = parseDate(departStr);
   const r = parseDate(returnStr);
-  // Both depart and return days are present in the UK.
   return Math.max(0, Math.floor((r - d) / 86400000) - 1);
 }
 
@@ -213,7 +314,7 @@ function updateView() {
   const tbody = document.querySelector("#tripTable tbody");
   tbody.innerHTML = "";
 
-  // Pre-entry Row
+  // Pre-entry row
   const preAbsent = getPreEntryAbsentDays();
   let row = document.createElement("tr");
   row.innerHTML = `<td>${data.grantDate} <small>(Grant)</small></td><td>${data.ukEntryDate} <small>(Entry)</small></td><td><strong>${preAbsent}</strong></td><td>Pre-entry (auto)</td><td>—</td>`;
@@ -227,7 +328,7 @@ function updateView() {
       <td>${t.depart}</td>
       <td>${t.return}</td>
       <td><strong>${absent}</strong></td>
-      <td>${t.notes || ''}</td>
+      <td>${t.notes || ""}</td>
       <td><button onclick="deleteTrip(${i})" style="background:#dc3545;padding:6px 12px;font-size:0.9em;">Delete</button></td>`;
     tbody.appendChild(row);
   });
@@ -238,12 +339,11 @@ function addTrip() {
   const ret = document.getElementById("return").value;
   const notes = document.getElementById("notes").value.trim();
   if (!depart || !ret) return alert("Please select both dates");
-  
   if (parseDate(depart) > parseDate(ret)) return alert("Return date must be after departure date");
 
   data.trips.push({depart, return: ret, notes});
   updateView();
-  
+
   departPicker.clear();
   returnPicker.clear();
   document.getElementById("notes").value = "";
@@ -256,17 +356,23 @@ function deleteTrip(i) {
   }
 }
 
-function downloadJson() {
-  const blob = new Blob([JSON.stringify(data, null, 2)], {type: "application/json"});
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = "trips.json";
-  a.click();
+// ====================== CSV DOWNLOAD ======================
+function downloadCsv() {
+  let csvContent = "Grant Date,UK Entry Date,Notes\n";
+  csvContent += `${data.grantDate},${data.ukEntryDate},${csvEscape("Grant Date - UK Entry Date (auto)")}\n`;
+  
+  data.trips.forEach(t => {
+    csvContent += `${t.depart},${t.return},${csvEscape(t.notes || "")}\n`;
+  });
+
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = "bno-absences.csv";
+  link.click();
 }
 
 // ====================== CALCULATION ENGINE ======================
-
-// Calculate overlap of an absence period with a specific window
 function getDaysInWindow(absentStart, absentEnd, windowStart, windowEnd) {
   let overlapStart = new Date(Math.max(absentStart, windowStart));
   let overlapEnd = new Date(Math.min(absentEnd, windowEnd));
@@ -277,93 +383,74 @@ function getDaysInWindow(absentStart, absentEnd, windowStart, windowEnd) {
 }
 
 function calculate() {
-  // 1. Generate STRICT absent periods (excluding depart/return days)
   const absentPeriods = [];
-
   const grant = parseDate(data.grantDate);
   const entry = parseDate(data.ukEntryDate);
-  
-  // Pre-entry absence: From Grant Date to (Entry Date - 1 day)
+
+  // Pre-entry
   let preEntryEnd = new Date(entry);
   preEntryEnd.setDate(preEntryEnd.getDate() - 1);
   if (grant <= preEntryEnd) {
     absentPeriods.push({ start: grant, end: preEntryEnd });
   }
 
-  // Trip absences: From (Depart Date + 1 day) to (Return Date - 1 day)
+  // Trips
   data.trips.forEach(t => {
     let d = parseDate(t.depart);
     let r = parseDate(t.return);
-    
-    let absentStart = new Date(d);
-    absentStart.setDate(absentStart.getDate() + 1);
-    
-    let absentEnd = new Date(r);
-    absentEnd.setDate(absentEnd.getDate() - 1);
-
+    let absentStart = new Date(d); absentStart.setDate(absentStart.getDate() + 1);
+    let absentEnd = new Date(r);   absentEnd.setDate(absentEnd.getDate() - 1);
     if (absentStart <= absentEnd) {
       absentPeriods.push({ start: absentStart, end: absentEnd });
     }
   });
 
-  // 2. ILR Rolling 180 Calculation
-  // We check 5 years starting from the Grant Date
+  // ILR Rolling 180
   let ilrStart = new Date(grant);
   let ilrEnd = new Date(grant);
   ilrEnd.setFullYear(ilrEnd.getFullYear() + 5);
-
   let maxRolling = 0;
   let current = new Date(ilrStart);
-
-  // Slide a 12-month window day by day
   while (current <= ilrEnd) {
     let windowEnd = new Date(current);
     windowEnd.setFullYear(windowEnd.getFullYear() + 1);
-    windowEnd.setDate(windowEnd.getDate() - 1); // Exact 12 month period
-
+    windowEnd.setDate(windowEnd.getDate() - 1);
     let sum = 0;
     absentPeriods.forEach(p => {
       sum += getDaysInWindow(p.start, p.end, current, windowEnd);
     });
-
     if (sum > maxRolling) maxRolling = sum;
     current.setDate(current.getDate() + 1);
   }
 
-  // 3. Citizenship Calculation (5+1 Route)
-  // Application date is exactly 6 years from Visa Grant (5 years ILR + 1 year hold)
+  // Citizenship (5+1)
   let citizenshipAppDate = new Date(grant);
   citizenshipAppDate.setFullYear(citizenshipAppDate.getFullYear() + 6);
-
   let fiveYearsBefore = new Date(citizenshipAppDate);
   fiveYearsBefore.setFullYear(fiveYearsBefore.getFullYear() - 5);
-
   let twelveMonthsBefore = new Date(citizenshipAppDate);
   twelveMonthsBefore.setFullYear(twelveMonthsBefore.getFullYear() - 1);
 
   let total5yr = 0;
   let final12m = 0;
-
   absentPeriods.forEach(p => {
     total5yr += getDaysInWindow(p.start, p.end, fiveYearsBefore, citizenshipAppDate);
     final12m += getDaysInWindow(p.start, p.end, twelveMonthsBefore, citizenshipAppDate);
   });
 
-  // Format dates for display
-  const formatDate = (d) => d.toISOString().split('T')[0];
+  const formatDate = (d) => d.toISOString().split("T")[0];
 
-  // 4. Render Results
-  let html = `<div class="${maxRolling <= 180 ? 'safe' : 'danger'}">`;
+  let html = `<div class="${maxRolling <= 180 ? "safe" : "danger"}">`;
   html += `<strong>ILR Rolling 180-Day Check:</strong><br>`;
-  html += `Maximum absences found in any 12-month period: <strong>${maxRolling} days</strong><br>`;
+  html += `Maximum absences in any 12-month period: <strong>${maxRolling} days</strong><br>`;
   html += (maxRolling <= 180) ? "✅ SAFE for ILR" : "❌ OVER LIMIT (Exceeds 180 days)";
   html += `</div>`;
 
-  html += `<div class="${total5yr <= 450 && final12m <= 90 ? 'safe' : 'danger'}">`;
-  html += `<strong>Citizenship Check (Assuming application on ${formatDate(citizenshipAppDate)}):</strong><br>`;
-  html += `5-year total absences (${formatDate(fiveYearsBefore)} to ${formatDate(citizenshipAppDate)}): <strong>${total5yr} days</strong> (Limit: 450)<br>`;
-  html += `Final 12 months absences (${formatDate(twelveMonthsBefore)} to ${formatDate(citizenshipAppDate)}): <strong>${final12m} days</strong> (Limit: 90)<br>`;
-  html += (total5yr <= 450 && final12m <= 90) ? "✅ SAFE for British citizenship" : "❌ RISK — Exceeds citizenship absence limits";
+  html += `<div class="${total5yr <= 450 && final12m <= 90 ? "safe" : "danger"}">`;
+  html += `<strong>Citizenship Check (application on ${formatDate(citizenshipAppDate)}):</strong><br>`;
+  html += `5-year total absences: <strong>${total5yr} days</strong> (limit 450)<br>`;
+  html += `Final 12 months: <strong>${final12m} days</strong> (limit 90)<br>`;
+  html += (total5yr <= 450 && final12m <= 90) ? "✅ SAFE for British citizenship" : "❌ RISK — Exceeds limits";
   html += `</div>`;
 
   document.getElementById("result").innerHTML = html;
@@ -377,6 +464,5 @@ function resetData() {
   }
 }
 </script>
-
 </body>
 </html>
