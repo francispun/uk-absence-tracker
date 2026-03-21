@@ -47,6 +47,7 @@
       margin-bottom: 25px;
       box-shadow: 0 8px 25px rgba(0,0,0,0.08);
     }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
     button {
       background: var(--uk-blue);
       color: white;
@@ -64,10 +65,11 @@
     th { background: var(--uk-blue); color: white; padding: 16px; text-align: left; }
     td { padding: 14px; border-bottom: 1px solid #eee; }
     tr:hover { background: #f8f9fa; }
-    .safe { background: #d4edda; color: #155724; padding: 18px; border-radius: 10px; font-size: 1.1em; }
-    .danger { background: #f8d7da; color: #721c24; padding: 18px; border-radius: 10px; font-size: 1.1em; }
-    .flatpickr-input { width: 48%; padding: 12px; border: 2px solid #ddd; border-radius: 6px; font-size: 1em; }
+    .safe { background: #d4edda; color: #155724; padding: 18px; border-radius: 10px; font-size: 1.1em; margin-bottom: 10px; }
+    .danger { background: #f8d7da; color: #721c24; padding: 18px; border-radius: 10px; font-size: 1.1em; margin-bottom: 10px; }
+    .flatpickr-input { width: 100%; box-sizing: border-box; padding: 12px; border: 2px solid #ddd; border-radius: 6px; font-size: 1em; }
     #status { text-align: center; font-style: italic; color: #555; margin-bottom: 10px; }
+    label { font-weight: bold; display: block; margin-bottom: 5px; }
   </style>
 </head>
 <body>
@@ -80,20 +82,40 @@
 </header>
 
 <div class="note-box">
-  <strong>✅ Official Home Office rule (March 2026):</strong><br>
+  <strong>✅ Official Home Office rules applied:</strong><br>
   • Departure day = present in UK (not absent)<br>
   • Return day / UK landing day = present in UK (not absent)<br>
-  • Only full 24-hour days entirely outside the UK count as absent days<br>
-  This planner shows your actual return date for planning, but the "Absent Days" column uses the correct official calculation.
+  • Only full 24-hour days entirely outside the UK count as absent days.<br>
+  • Pre-entry absence is calculated from Visa Grant Date to the day before UK Entry Date.
 </div>
 
 <div id="status">Loading your trips.json automatically...</div>
 
+<div class="card grid-2">
+  <div>
+    <label>Visa Grant Date:</label>
+    <input type="text" id="grantDate" class="flatpickr-input" onchange="updateBaseDates()" />
+  </div>
+  <div>
+    <label>UK Entry Date:</label>
+    <input type="text" id="entryDate" class="flatpickr-input" onchange="updateBaseDates()" />
+  </div>
+</div>
+
 <div class="card">
   <h2>Add / Plan a New Trip</h2>
-  Departure: <input type="text" id="depart" class="flatpickr-input" placeholder="Select departure date" /><br><br>
-  Return (landing date): <input type="text" id="return" class="flatpickr-input" placeholder="Select return date" /><br><br>
-  Notes: <input type="text" id="notes" placeholder="e.g. Family visit in HK" style="width:65%; padding:12px;" /><br><br>
+  <div class="grid-2" style="margin-bottom: 15px;">
+    <div>
+      <label>Departure Date:</label>
+      <input type="text" id="depart" class="flatpickr-input" placeholder="Select departure date" />
+    </div>
+    <div>
+      <label>Return Date (landing in UK):</label>
+      <input type="text" id="return" class="flatpickr-input" placeholder="Select return date" />
+    </div>
+  </div>
+  <label>Notes:</label>
+  <input type="text" id="notes" placeholder="e.g. Family visit in HK" style="width:100%; padding:12px; margin-bottom: 15px; box-sizing: border-box; border: 2px solid #ddd; border-radius: 6px;" />
   <button class="add-btn" onclick="addTrip()">Add Trip</button>
 </div>
 
@@ -112,7 +134,7 @@
 <div id="result"></div>
 
 <div style="text-align:center; margin-top:40px;">
-  <button onclick="downloadJson()">Download updated trips.json (save to GitHub)</button>
+  <button onclick="downloadJson()">Download updated trips.json</button>
   <button onclick="resetData()" style="background:#dc3545; margin-left:15px;">Reset Everything</button>
 </div>
 
@@ -126,20 +148,19 @@ let data = {
   trips: []
 };
 
-const citizenshipAppDate = new Date("2032-02-16");
-
 // ====================== FLATPICKR ======================
+const grantPicker = flatpickr("#grantDate", { dateFormat: "Y-m-d", defaultDate: data.grantDate });
+const entryPicker = flatpickr("#entryDate", { dateFormat: "Y-m-d", defaultDate: data.ukEntryDate });
+
 const departPicker = flatpickr("#depart", {
   dateFormat: "Y-m-d",
-  minDate: data.grantDate,
   onChange: function(selectedDates, dateStr) {
     if (dateStr) returnPicker.set("minDate", dateStr);
   }
 });
 
 const returnPicker = flatpickr("#return", {
-  dateFormat: "Y-m-d",
-  minDate: data.grantDate
+  dateFormat: "Y-m-d"
 });
 
 // ====================== AUTO LOAD ======================
@@ -147,7 +168,11 @@ async function loadAuto() {
   try {
     const res = await fetch('trips.json');
     if (!res.ok) throw new Error();
-    data = await res.json();
+    const loadedData = await res.json();
+    if(loadedData.grantDate) data = loadedData;
+    
+    grantPicker.setDate(data.grantDate);
+    entryPicker.setDate(data.ukEntryDate);
     document.getElementById('status').innerHTML = '✅ trips.json loaded automatically';
   } catch {
     document.getElementById('status').innerHTML = '⚠️ trips.json not found yet — add trips and download to save';
@@ -157,30 +182,51 @@ async function loadAuto() {
 window.addEventListener('load', loadAuto);
 
 // ====================== HELPERS ======================
-function daysAbsent(d1, d2) {
-  const start = (d1 instanceof Date) ? d1 : new Date(d1);
-  const end = (d2 instanceof Date) ? d2 : new Date(d2);
-  return Math.max(0, Math.floor((end - start) / 86400000));
+// Parse YYYY-MM-DD reliably to local date to avoid timezone shifting
+function parseDate(str) {
+  const [y, m, d] = str.split('-');
+  return new Date(y, m - 1, d);
+}
+
+function updateBaseDates() {
+  data.grantDate = document.getElementById("grantDate").value;
+  data.ukEntryDate = document.getElementById("entryDate").value;
+  updateView();
+}
+
+// Get exact absent days based on Home Office Rules
+function getPreEntryAbsentDays() {
+  const grant = parseDate(data.grantDate);
+  const entry = parseDate(data.ukEntryDate);
+  // Grant day is absent. Entry day is present.
+  return Math.max(0, Math.floor((entry - grant) / 86400000));
+}
+
+function getTripAbsentDays(departStr, returnStr) {
+  const d = parseDate(departStr);
+  const r = parseDate(returnStr);
+  // Both depart and return days are present in the UK.
+  return Math.max(0, Math.floor((r - d) / 86400000) - 1);
 }
 
 function updateView() {
   const tbody = document.querySelector("#tripTable tbody");
   tbody.innerHTML = "";
 
-  // Pre-entry
-  const preAbsent = daysAbsent(data.grantDate, data.ukEntryDate);
+  // Pre-entry Row
+  const preAbsent = getPreEntryAbsentDays();
   let row = document.createElement("tr");
-  row.innerHTML = `<td>${data.grantDate}</td><td>${data.ukEntryDate} <small>(presence)</small></td><td>${preAbsent}</td><td>Pre-entry (auto)</td><td>—</td>`;
+  row.innerHTML = `<td>${data.grantDate} <small>(Grant)</small></td><td>${data.ukEntryDate} <small>(Entry)</small></td><td><strong>${preAbsent}</strong></td><td>Pre-entry (auto)</td><td>—</td>`;
   tbody.appendChild(row);
 
   // User trips
   data.trips.forEach((t, i) => {
-    const absent = daysAbsent(t.depart, t.return);
+    const absent = getTripAbsentDays(t.depart, t.return);
     row = document.createElement("tr");
     row.innerHTML = `
       <td>${t.depart}</td>
-      <td>${t.return} <small>(presence)</small></td>
-      <td>${absent}</td>
+      <td>${t.return}</td>
+      <td><strong>${absent}</strong></td>
       <td>${t.notes || ''}</td>
       <td><button onclick="deleteTrip(${i})" style="background:#dc3545;padding:6px 12px;font-size:0.9em;">Delete</button></td>`;
     tbody.appendChild(row);
@@ -192,10 +238,14 @@ function addTrip() {
   const ret = document.getElementById("return").value;
   const notes = document.getElementById("notes").value.trim();
   if (!depart || !ret) return alert("Please select both dates");
+  
+  if (parseDate(depart) > parseDate(ret)) return alert("Return date must be after departure date");
+
   data.trips.push({depart, return: ret, notes});
   updateView();
-  document.getElementById("depart").value = "";
-  document.getElementById("return").value = "";
+  
+  departPicker.clear();
+  returnPicker.clear();
   document.getElementById("notes").value = "";
 }
 
@@ -214,61 +264,106 @@ function downloadJson() {
   a.click();
 }
 
-// ====================== CALCULATION (FIXED) ======================
+// ====================== CALCULATION ENGINE ======================
+
+// Calculate overlap of an absence period with a specific window
+function getDaysInWindow(absentStart, absentEnd, windowStart, windowEnd) {
+  let overlapStart = new Date(Math.max(absentStart, windowStart));
+  let overlapEnd = new Date(Math.min(absentEnd, windowEnd));
+  if (overlapStart <= overlapEnd) {
+    return Math.floor((overlapEnd - overlapStart) / 86400000) + 1;
+  }
+  return 0;
+}
+
 function calculate() {
-  const periods = [];
-  periods.push({ start: new Date(data.grantDate), end: new Date(data.ukEntryDate) });
-  data.trips.forEach(t => periods.push({ start: new Date(t.depart), end: new Date(t.return) }));
+  // 1. Generate STRICT absent periods (excluding depart/return days)
+  const absentPeriods = [];
 
-  // ILR rolling 180
+  const grant = parseDate(data.grantDate);
+  const entry = parseDate(data.ukEntryDate);
+  
+  // Pre-entry absence: From Grant Date to (Entry Date - 1 day)
+  let preEntryEnd = new Date(entry);
+  preEntryEnd.setDate(preEntryEnd.getDate() - 1);
+  if (grant <= preEntryEnd) {
+    absentPeriods.push({ start: grant, end: preEntryEnd });
+  }
+
+  // Trip absences: From (Depart Date + 1 day) to (Return Date - 1 day)
+  data.trips.forEach(t => {
+    let d = parseDate(t.depart);
+    let r = parseDate(t.return);
+    
+    let absentStart = new Date(d);
+    absentStart.setDate(absentStart.getDate() + 1);
+    
+    let absentEnd = new Date(r);
+    absentEnd.setDate(absentEnd.getDate() - 1);
+
+    if (absentStart <= absentEnd) {
+      absentPeriods.push({ start: absentStart, end: absentEnd });
+    }
+  });
+
+  // 2. ILR Rolling 180 Calculation
+  // We check 5 years starting from the Grant Date
+  let ilrStart = new Date(grant);
+  let ilrEnd = new Date(grant);
+  ilrEnd.setFullYear(ilrEnd.getFullYear() + 5);
+
   let maxRolling = 0;
-  let minD = new Date(Math.min(...periods.map(p => p.start.getTime())));
-  minD.setFullYear(minD.getFullYear() - 1);
-  let maxD = new Date(Math.max(...periods.map(p => p.end.getTime())));
-  maxD.setFullYear(maxD.getFullYear() + 1);
+  let current = new Date(ilrStart);
 
-  let current = new Date(minD);
-  while (current <= maxD) {
-    const wEnd = new Date(current);
-    wEnd.setDate(wEnd.getDate() + 364);
+  // Slide a 12-month window day by day
+  while (current <= ilrEnd) {
+    let windowEnd = new Date(current);
+    windowEnd.setFullYear(windowEnd.getFullYear() + 1);
+    windowEnd.setDate(windowEnd.getDate() - 1); // Exact 12 month period
 
     let sum = 0;
-    periods.forEach(p => {
-      const oStart = new Date(Math.max(p.start.getTime(), current.getTime()));
-      const oEnd = new Date(Math.min(p.end.getTime(), wEnd.getTime()));
-      if (oStart <= oEnd) {
-        sum += daysAbsent(oStart, oEnd);
-      }
+    absentPeriods.forEach(p => {
+      sum += getDaysInWindow(p.start, p.end, current, windowEnd);
     });
+
     if (sum > maxRolling) maxRolling = sum;
     current.setDate(current.getDate() + 1);
   }
 
-  // Citizenship (2027-02-16 to 2032-02-16)
-  const fiveYearsBefore = new Date(2027, 1, 16);
-  const twelveMonthsBefore = new Date(2031, 1, 16);
+  // 3. Citizenship Calculation (5+1 Route)
+  // Application date is exactly 6 years from Visa Grant (5 years ILR + 1 year hold)
+  let citizenshipAppDate = new Date(grant);
+  citizenshipAppDate.setFullYear(citizenshipAppDate.getFullYear() + 6);
+
+  let fiveYearsBefore = new Date(citizenshipAppDate);
+  fiveYearsBefore.setFullYear(fiveYearsBefore.getFullYear() - 5);
+
+  let twelveMonthsBefore = new Date(citizenshipAppDate);
+  twelveMonthsBefore.setFullYear(twelveMonthsBefore.getFullYear() - 1);
 
   let total5yr = 0;
   let final12m = 0;
 
-  periods.forEach(p => {
-    const o5s = new Date(Math.max(p.start.getTime(), fiveYearsBefore.getTime()));
-    const o5e = new Date(Math.min(p.end.getTime(), citizenshipAppDate.getTime()));
-    if (o5s <= o5e) total5yr += daysAbsent(o5s, o5e);
-
-    const o12s = new Date(Math.max(p.start.getTime(), twelveMonthsBefore.getTime()));
-    const o12e = new Date(Math.min(p.end.getTime(), citizenshipAppDate.getTime()));
-    if (o12s <= o12e) final12m += daysAbsent(o12s, o12e);
+  absentPeriods.forEach(p => {
+    total5yr += getDaysInWindow(p.start, p.end, fiveYearsBefore, citizenshipAppDate);
+    final12m += getDaysInWindow(p.start, p.end, twelveMonthsBefore, citizenshipAppDate);
   });
 
-  // Result
-  let html = `<div class="safe"><strong>ILR Rolling 180:</strong> Max = ${maxRolling} days<br>`;
-  html += (maxRolling <= 180) ? "✅ SAFE for ILR" : "❌ OVER LIMIT";
-  html += `</div><br><div class="${total5yr <= 450 && final12m <= 90 ? 'safe' : 'danger'}">`;
-  html += `<strong>Citizenship (apply Feb 2032):</strong><br>`;
-  html += `5-year total = ${total5yr} days (limit 450)<br>`;
-  html += `Final 12 months = ${final12m} days (limit 90)<br>`;
-  html += (total5yr <= 450 && final12m <= 90) ? "✅ SAFE for British citizenship" : "❌ RISK — may affect citizenship";
+  // Format dates for display
+  const formatDate = (d) => d.toISOString().split('T')[0];
+
+  // 4. Render Results
+  let html = `<div class="${maxRolling <= 180 ? 'safe' : 'danger'}">`;
+  html += `<strong>ILR Rolling 180-Day Check:</strong><br>`;
+  html += `Maximum absences found in any 12-month period: <strong>${maxRolling} days</strong><br>`;
+  html += (maxRolling <= 180) ? "✅ SAFE for ILR" : "❌ OVER LIMIT (Exceeds 180 days)";
+  html += `</div>`;
+
+  html += `<div class="${total5yr <= 450 && final12m <= 90 ? 'safe' : 'danger'}">`;
+  html += `<strong>Citizenship Check (Assuming application on ${formatDate(citizenshipAppDate)}):</strong><br>`;
+  html += `5-year total absences (${formatDate(fiveYearsBefore)} to ${formatDate(citizenshipAppDate)}): <strong>${total5yr} days</strong> (Limit: 450)<br>`;
+  html += `Final 12 months absences (${formatDate(twelveMonthsBefore)} to ${formatDate(citizenshipAppDate)}): <strong>${final12m} days</strong> (Limit: 90)<br>`;
+  html += (total5yr <= 450 && final12m <= 90) ? "✅ SAFE for British citizenship" : "❌ RISK — Exceeds citizenship absence limits";
   html += `</div>`;
 
   document.getElementById("result").innerHTML = html;
@@ -278,7 +373,7 @@ function resetData() {
   if (confirm("Reset everything?")) {
     data.trips = [];
     updateView();
-    calculate();
+    document.getElementById("result").innerHTML = "";
   }
 }
 </script>
