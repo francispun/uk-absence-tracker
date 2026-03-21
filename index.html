@@ -3,86 +3,169 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🇬🇧</text></svg>">
-  <title>BNO Planner — ILR + Citizenship (Shortest Route)</title>
+  <title>BNO Planner — ILR + Citizenship</title>
+  <!-- UK Flag Emoji Favicon -->
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22 text-anchor=%22middle%22 x=%2250%25%22>🇬🇧</text></svg>">
+  
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
   <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+  
   <style>
-    body { font-family: Arial, sans-serif; max-width: 1000px; margin: 20px auto; padding: 20px; line-height: 1.6; }
-    h1 { text-align: center; color: #1a5276; }
-    .box { background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 20px 0; border: 1px solid #ddd; }
-    button { padding: 10px 20px; margin: 5px; cursor: pointer; font-size: 1em; }
-    table { width: 100%; border-collapse: collapse; margin: 15px 0; }
-    th, td { border: 1px solid #ccc; padding: 10px; text-align: left; }
-    th { background: #e9ecef; }
-    .safe { color: green; font-weight: bold; background: #e8f5e9; padding: 12px; border-radius: 6px; }
-    .danger { color: red; font-weight: bold; background: #ffebee; padding: 12px; border-radius: 6px; }
-    #status { text-align: center; font-style: italic; color: #555; }
-    .flatpickr-input { width: 48%; }
+    :root {
+      --uk-blue: #00247d;
+      --uk-red: #cf142b;
+    }
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #f4f7fa;
+      color: #222;
+      line-height: 1.6;
+      margin: 0;
+      padding: 20px;
+    }
+    .container { max-width: 1100px; margin: 0 auto; }
+    header {
+      background: var(--uk-blue);
+      color: white;
+      padding: 20px;
+      border-radius: 12px;
+      text-align: center;
+      margin-bottom: 30px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    }
+    h1 { margin: 0; font-size: 2.2em; }
+    .note-box {
+      background: #fff3cd;
+      border: 2px solid #ffc107;
+      padding: 15px;
+      border-radius: 10px;
+      margin: 20px 0;
+      font-weight: 500;
+    }
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 25px;
+      margin-bottom: 25px;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.08);
+    }
+    button {
+      background: var(--uk-blue);
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 1.05em;
+      transition: all 0.3s;
+    }
+    button:hover { background: #001a5e; transform: translateY(-2px); }
+    .add-btn { background: #28a745; }
+    .add-btn:hover { background: #218838; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 15px 0;
+      background: white;
+    }
+    th {
+      background: var(--uk-blue);
+      color: white;
+      padding: 14px;
+      text-align: left;
+    }
+    td {
+      padding: 14px;
+      border-bottom: 1px solid #eee;
+    }
+    tr:hover { background: #f8f9fa; }
+    .safe { background: #d4edda; color: #155724; padding: 15px; border-radius: 10px; }
+    .danger { background: #f8d7da; color: #721c24; padding: 15px; border-radius: 10px; }
+    .flatpickr-input { width: 48%; padding: 10px; border: 2px solid #ddd; border-radius: 6px; }
+    #status { text-align: center; font-style: italic; color: #555; margin-bottom: 10px; }
   </style>
 </head>
 <body>
 
-<h1>BNO Absence Planner<br>ILR (Rolling 180) + Citizenship (450/90 days — shortest route)</h1>
+<div class="container">
 
-<div id="status">Loading trips.json automatically...</div>
+<header>
+  <h1>🇬🇧 BNO Absence Planner</h1>
+  <p>ILR (Rolling 180 days) + Citizenship (450/90 days — shortest 5+1 route)</p>
+</header>
 
-<div class="box">
-  <h2>Add / Plan a Trip (calendar)</h2>
-  Departure: <input type="text" id="depart" class="flatpickr-input" placeholder="Pick date" />
-  Return:    <input type="text" id="return" class="flatpickr-input" placeholder="Pick date" /><br>
-  Notes:     <input type="text" id="notes" placeholder="e.g. Family visit HK" style="width:60%;" />
-  <button onclick="addTrip()">Add Trip</button>
+<div class="note-box">
+  <strong>✅ How days are calculated (official Home Office rule — March 2026):</strong><br>
+  • Departure day = present in UK (not absent)<br>
+  • Return day / UK Entry day = present in UK (not absent)<br>
+  • Only full 24-hour days entirely outside the UK count as absent<br>
+  • This planner shows your actual return/landing date (for easy planning) but the "Days" column shows the correct absent days.
 </div>
 
-<h2>Absences (Pre-entry auto + your trips)</h2>
-<table id="tripTable">
-  <thead><tr><th>Depart</th><th>Return</th><th>Days</th><th>Notes</th><th>Action</th></tr></thead>
-  <tbody></tbody>
-</table>
+<div id="status">Loading your trips.json automatically...</div>
 
-<div class="box">
-  <button onclick="calculate()" style="font-size:1.2em; padding:15px 30px;">Calculate — Check ILR & Citizenship Safety</button>
+<div class="card">
+  <h2>Add / Plan a New Trip</h2>
+  <label>Departure: <input type="text" id="depart" class="flatpickr-input" placeholder="Select date" /></label>
+  <label>Return (landing date): <input type="text" id="return" class="flatpickr-input" placeholder="Select date" /></label><br><br>
+  <label>Notes: <input type="text" id="notes" placeholder="e.g. Family visit in HK" style="width:65%; padding:10px;" /></label><br>
+  <button class="add-btn" onclick="addTrip()">Add Trip</button>
 </div>
 
-<div id="result"></div>
+<div class="card">
+  <h2>Your Absences</h2>
+  <table id="tripTable">
+    <thead>
+      <tr><th>Depart</th><th>Return (landing)</th><th>Absent Days</th><th>Notes</th><th>Action</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
 
-<button onclick="downloadJson()">Download updated trips.json (save to GitHub)</button>
-<button onclick="resetData()">Reset everything</button>
+<div class="card">
+  <button onclick="calculate()" style="width:100%; padding:18px; font-size:1.3em;">Calculate Safety for ILR & Citizenship</button>
+</div>
+
+<div id="result" style="margin:20px 0;"></div>
+
+<div style="text-align:center; margin-top:30px;">
+  <button onclick="downloadJson()">Download updated trips.json (save to GitHub)</button>
+  <button onclick="resetData()" style="background:#dc3545;">Reset Everything</button>
+</div>
+
+</div>
 
 <script>
-// ====================== CONFIG ======================
+// ====================== CONFIG & GLOBALS ======================
 let data = {
   grantDate: "2026-02-16",
   ukEntryDate: "2026-06-10",
   trips: []
 };
 
-// Auto-set citizenship application date (shortest route: 5 years + 1 year ILR)
-const citizenshipAppDate = new Date(data.grantDate);
-citizenshipAppDate.setFullYear(citizenshipAppDate.getFullYear() + 6); // 16 Feb 2032
+const citizenshipAppDate = new Date("2032-02-16"); // grant + 6 years (shortest 5+1)
 
-// Flatpickr calendars
+// Flatpickr
 flatpickr("#depart", { dateFormat: "Y-m-d", minDate: data.grantDate, onChange: (_, str) => returnPicker.set("minDate", str) });
 const returnPicker = flatpickr("#return", { dateFormat: "Y-m-d", minDate: data.grantDate });
 
-// ====================== AUTO-LOAD trips.json ======================
+// ====================== AUTO LOAD trips.json ======================
 async function loadAuto() {
   try {
     const res = await fetch('trips.json');
-    if (!res.ok) throw new Error();
     data = await res.json();
     document.getElementById('status').innerHTML = '✅ trips.json loaded automatically';
   } catch {
-    document.getElementById('status').innerHTML = '⚠️ No trips.json found yet — using defaults. Add trips and download.';
+    document.getElementById('status').innerHTML = '⚠️ trips.json not found yet — add trips and download to save';
   }
   updateView();
 }
 window.addEventListener('load', loadAuto);
 
-// ====================== CORE FUNCTIONS ======================
-function daysBetween(d1, d2) {
-  return Math.floor(Math.abs(d2 - d1) / (1000*60*60*24)) + 1;
+// ====================== HELPER ======================
+function daysAbsent(d1, d2) {
+  // Official method: return - depart (no +1) → only full days outside
+  return Math.floor((d2.getTime() - d1.getTime()) / (86400000));
 }
 
 function updateView() {
@@ -90,20 +173,22 @@ function updateView() {
   tbody.innerHTML = "";
 
   // Pre-entry
-  const preEnd = new Date(data.ukEntryDate);
-  preEnd.setDate(preEnd.getDate() - 1);
-  const preDays = daysBetween(new Date(data.grantDate), preEnd);
+  const entryDate = new Date(data.ukEntryDate);
+  const preAbsent = daysAbsent(new Date(data.grantDate), entryDate);
   let row = document.createElement("tr");
-  row.innerHTML = `<td>${data.grantDate}</td><td>${preEnd.toISOString().split('T')[0]}</td><td>${preDays}</td><td>Pre-entry (auto)</td><td>—</td>`;
+  row.innerHTML = `<td>${data.grantDate}</td><td>${data.ukEntryDate} <small>(presence)</small></td><td>${preAbsent}</td><td>Pre-entry (auto)</td><td>—</td>`;
   tbody.appendChild(row);
 
   // User trips
   data.trips.forEach((t, i) => {
-    const days = daysBetween(new Date(t.depart), new Date(t.return));
+    const absentDays = daysAbsent(new Date(t.depart), new Date(t.return));
     row = document.createElement("tr");
     row.innerHTML = `
-      <td>${t.depart}</td><td>${t.return}</td><td>${days}</td><td>${t.notes||''}</td>
-      <td><button onclick="deleteTrip(${i})">Delete</button></td>`;
+      <td>${t.depart}</td>
+      <td>${t.return} <small>(presence)</small></td>
+      <td>${absentDays}</td>
+      <td>${t.notes || ''}</td>
+      <td><button onclick="deleteTrip(${i})" style="background:#dc3545;padding:6px 12px;font-size:0.9em;">Delete</button></td>`;
     tbody.appendChild(row);
   });
 }
@@ -112,9 +197,10 @@ function addTrip() {
   const depart = document.getElementById("depart").value;
   const ret = document.getElementById("return").value;
   const notes = document.getElementById("notes").value.trim();
-  if (!depart || !ret) return alert("Please pick both dates");
+  if (!depart || !ret) return alert("Please select both dates");
   data.trips.push({depart, return: ret, notes});
   updateView();
+  // clear form
   document.getElementById("depart").value = "";
   document.getElementById("return").value = "";
   document.getElementById("notes").value = "";
@@ -135,7 +221,6 @@ function downloadJson() {
   a.click();
 }
 
-// ====================== CALCULATION ======================
 function calculate() {
   const periods = [];
   // Pre-entry
@@ -203,6 +288,5 @@ function resetData() {
   }
 }
 </script>
-
 </body>
 </html>
